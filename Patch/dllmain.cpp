@@ -9,6 +9,10 @@
 #include <thread>
 #include <sstream>
 
+#undef min
+#undef max
+
+
 extern "C"
 {
 	typedef HRESULT(_stdcall* tTVPV2LinkProc)(iTVPFunctionExporter*);
@@ -25,13 +29,16 @@ typedef bool                (__cdecl* CSMFS_CheckExistenceStorage)	(void*, tTJSS
 typedef tTJSBinaryStream*	(__cdecl* CSMFS_Open)                   (void*, tTJSString*, int);
 typedef int                 (__cdecl* CSMFS_Constructor)            (void**, tTJSVariant*, int, tTJSVariant**);
 
+typedef void				(_cdecl* tKrkrzCdeclFreeProc)			(void*);
+typedef void*				(_cdecl* tKrkrzCdeclNewProc)			(size_t);
+
 //#define COUT(x) std::cout << x << std::endl;
 //#define ONLY_BYPASS_SIGCHECK                  //仅过验证，不安装文件相关hook
+//#define DUMP_SCRIPTS
 constexpr int PACKAGE_AMOUNT = 5;               //游戏一共（至少）要加载多少封包
 
 static HMODULE EBaseAddr = 0;//game.exe基址
 static HMODULE CBaseAddr = 0;//cxdec.dll基址
-static DWORD pMyLoadCXAndPatch = 0;
 //放一个标志指示Cxdec是否已经加载
 static bool IsLoadedCxdec = false;
 //指示文件系统是否加载完成，即是否可以dump文件
@@ -39,6 +46,22 @@ static bool IsFSInitialized = false;
 //记录游戏一共调用Mount加载了几个封包（根据这个判断是否加载完成）
 static int PackagesLoaded = 0;
 
+
+//用于实现BinaryStream所必要的new和delete
+tKrkrzCdeclNewProc pfnKrkrzNew = nullptr;
+tKrkrzCdeclFreeProc pfnKrkrzFree = nullptr;
+void* KrkrNew(size_t count)
+{
+	return pfnKrkrzNew(count);
+}
+
+void KrkrFree(void* ptr)
+{
+	return pfnKrkrzFree(ptr);
+}
+
+//与BinaryStream有关的实现
+#pragma region BinaryStreamImpl
 //这个类的详细定义并不在tp_stub.h里，因为他是一个内部类
 class tTJSBinaryStream
 {
@@ -51,12 +74,137 @@ public:
 	virtual ~tTJSBinaryStream() { }
 };
 
+class PBinaryStream : public tTJSBinaryStream
+{
+public:
+	static void* operator new(size_t count)
+	{
+		return KrkrNew(count);
+	}
 
-void DumpAllScripts();
-tTJSBinaryStream* MyOpen(void* a, tTJSString* name, int flags);
-int __fastcall MyMount(void* a, void* notused, tTJSVariant* b, tTJSVariant* c, tTJSVariant* d);
-bool __fastcall MyFindEntry(void* a, void* notused, tTJSString* b, tTJSString* c, tTJSString* d, tTJSVariant* e);
-bool MyCheckExistenceStorage(void* a, tTJSString* b);
+	static void operator delete(void* ptr)
+	{
+		return KrkrFree(ptr);
+	}
+
+	PBinaryStream(const uint8_t* data, size_t size)
+	{
+		if (size > 0)
+		{
+			m_data.resize(size);
+			memcpy(m_data.data(), data, size);
+		}
+		m_size = size;
+		m_offset = 0;
+	}
+
+	PBinaryStream(const std::vector<uint8_t>& data)
+	{
+		m_data = data;
+		m_size = m_data.size();
+		m_offset = 0;
+	}
+
+	PBinaryStream(std::vector<uint8_t>&& data)
+	{
+		m_data = std::move(data);
+		m_size = m_data.size();
+		m_offset = 0;
+	}
+
+	PBinaryStream(PBinaryStream&& o) noexcept
+	{
+		m_data = std::move(o.m_data);
+		m_size = o.m_size;
+		m_offset = o.m_offset;
+		o.m_size = 0;
+		o.m_offset = 0;
+	}
+
+	PBinaryStream(const PBinaryStream&) = delete;
+
+	PBinaryStream& operator=(const PBinaryStream&) = delete;
+
+	~PBinaryStream()
+	{
+		m_data.clear();
+		m_size = 0;
+		m_offset = 0;
+	}
+
+	tjs_uint64 TJS_INTF_METHOD Seek(tjs_int64 offset, tjs_int whence) override
+	{
+		switch (whence)
+		{
+			case TJS_BS_SEEK_SET:
+			{
+				if (offset >= 0 && offset <= m_size)
+					m_offset = (ptrdiff_t)offset;
+				break;
+			}
+			case TJS_BS_SEEK_CUR:
+			{
+				tjs_int64 new_offset = m_offset + offset;
+				if (new_offset >= 0 && new_offset <= m_size)
+					m_offset = (ptrdiff_t)new_offset;
+				break;
+			}
+			case TJS_BS_SEEK_END:
+			{
+				tjs_int64 new_offset = m_size + offset;
+				if (new_offset >= 0 && new_offset <= m_size)
+					m_offset = (ptrdiff_t)new_offset;
+				break;
+			}
+		}
+
+		return m_offset;
+	}
+
+	tjs_uint TJS_INTF_METHOD Read(void* buffer, tjs_uint read_size) override
+	{
+		tjs_uint count = std::min((size_t)read_size, m_size - m_offset);
+
+		if (count > 0)
+		{
+			memcpy(buffer, m_data.data() + m_offset, count);
+			m_offset += count;
+			return count;
+		}
+
+		return 0;
+	}
+
+	tjs_uint TJS_INTF_METHOD Write(const void* buffer, tjs_uint write_size) override
+	{
+		UNREFERENCED_PARAMETER(buffer);
+		UNREFERENCED_PARAMETER(write_size);
+		return 0;
+	}
+
+	void TJS_INTF_METHOD SetEndOfStorage() override
+	{
+		m_offset = m_size;
+	}
+
+	tjs_uint64 TJS_INTF_METHOD GetSize() override
+	{
+		return m_size;
+	}
+
+private:
+	std::vector<uint8_t> m_data;
+	size_t m_size;
+	ptrdiff_t m_offset;
+};
+#pragma endregion
+
+
+void								DumpAllScripts			();
+tTJSBinaryStream*					MyOpen					(void* a, tTJSString* name, int flags);
+int					__fastcall		MyMount					(void* a, void* notused, tTJSVariant* b, tTJSVariant* c, tTJSVariant* d);
+bool				__fastcall		MyFindEntry				(void* a, void* notused, tTJSString* b, tTJSString* c, tTJSString* d, tTJSVariant* e);
+bool								MyCheckExistenceStorage	(void* a, tTJSString* b);
 
 
 //在这里设置并存储this指针以及相关成员函数的指针
@@ -75,11 +223,13 @@ struct CX_Funcs
         auto base = GetModuleBase(CBaseAddr);
         auto size = GetModuleSize(CBaseAddr);
         m_this = CompoundStorageMedia;
+		//这两个时必须拿到的，如果要进行文件替换的话
         m_CheckExistenceStorage = (CSMFS_CheckExistenceStorage)SearchPattern(base, size, CX_CSMediaFS_CheckExistenceStorage, sizeofsig(CX_CSMediaFS_CheckExistenceStorage));
+        m_Open = (CSMFS_Open)SearchPattern(base, size, CX_CSMediaFS_Open, sizeofsig(CX_CSMediaFS_Open));
+        //剩下这几个都随便了，其实这些更偏向实验性的
+		m_Mount = (CSMFS_Mount)SearchPattern(base, size, CX_CSMediaFS_Mount, sizeofsig(CX_CSMediaFS_Mount));
         m_FindEntry = (CSMFS_FindEntry)SearchPattern(base, size, CX_CSMediaFS_FindEntry, sizeofsig(CX_CSMediaFS_FindEntry));
         m_GetPathHash = (CSMFS_GetPathHash)SearchPattern(base, size, CX_CSMediaFS_GetPathHash, sizeofsig(CX_CSMediaFS_GetPathHash));
-        m_Open = (CSMFS_Open)SearchPattern(base, size, CX_CSMediaFS_Open, sizeofsig(CX_CSMediaFS_Open));
-        m_Mount = (CSMFS_Mount)SearchPattern(base, size, CX_CSMediaFS_Mount, sizeofsig(CX_CSMediaFS_Mount));
         
         //函数劫持
         InlineHook(m_Open, MyOpen);
@@ -126,14 +276,14 @@ bool MyCheckExistenceStorage(void* a, tTJSString* b)
 
 tTJSBinaryStream* __cdecl MyOpen(void* a, tTJSString* name, int flags)
 {
-	//std::cout << "Open: " << Ucs2ToGbk(name->c_str()) << std::endl;
+	std::cout << "Open: " << Ucs2ToGbk(name->c_str()) << std::endl;
 	return static_CXFuncs.m_Open(a, name, flags);
 }
 
 
 int __fastcall MyMount(void* a, void* notused, tTJSVariant* b, tTJSVariant* c, tTJSVariant* d)
 {
-    tTJSString path(c->AsString());
+    //tTJSString path(c->AsString());
     //std::cout << "Mount: " << Ucs2ToGbk(path.c_str()) << std::endl;
     PackagesLoaded++;
     return static_CXFuncs.m_Mount(a, notused, b, c, d);
@@ -291,6 +441,43 @@ void DumpAllScripts()
     }
 }
 
+bool DumpFile(std::wstring& file)
+{
+	tTJSString tjsfile(file.c_str());
+	if (static_CXFuncs.m_CheckExistenceStorage(static_CXFuncs.m_this, &tjsfile))
+	{
+		auto stream = static_CXFuncs.m_Open(static_CXFuncs.m_this, &tjsfile, 0);
+		if (stream)
+		{
+			auto s = stream->GetSize();
+			auto buffer = new char[s];
+
+			stream->Read(buffer, s);
+			delete stream;
+
+			std::wcout << L"[INFO][Dump]:" << file << std::endl;
+			std::ofstream ofst(L"./Dump/" + file.substr(2), std::ios::binary);
+			ofst.write(buffer, s);
+			ofst.flush();
+			ofst.close();
+			delete[] buffer;
+		}
+	}
+}
+
+void MkDdirs()
+{
+	CPathW w = GetAppDirectoryW();
+	w.AddBackslash();
+	w += L"Dump";
+	auto fo = SHCreateDirectory(NULL, w);
+	if (fo != ERROR_SUCCESS && fo != ERROR_ALREADY_EXISTS) {
+		std::cout << "Failed to create dump directory!" << std::endl;
+		return;
+	}
+}
+
+//#define DUMP_SCRIPTS
 void CheckAndDump()
 {
     while (PackagesLoaded < PACKAGE_AMOUNT)
@@ -299,15 +486,24 @@ void CheckAndDump()
     }
     IsFSInitialized = true;
     std::cout << "FS Initialized successfully." << std::endl;
-    DumpAllScripts();
+	MkDdirs();
+#ifdef DUMP_SCRIPTS
+	DumpAllScripts();
+#endif
 }
 
-//劫持插件加载流程
-void HijackCxdecLoadRouting()
+//获得exe内的malloc和free来使用
+void GetExeMallocFuncs()
 {
-	SignaturePatch(EBaseAddr, LoadCXSIG, &pMyLoadCXAndPatch, sizeofsig(LoadCXSIG));
+	pfnKrkrzNew = (tKrkrzCdeclNewProc)SearchPattern(GetModuleBase(EBaseAddr), GetModuleSize(EBaseAddr), KRKRZ_OPERATOR_NEW_SIG, sizeofsig(KRKRZ_OPERATOR_NEW_SIG));
+	pfnKrkrzFree = (tKrkrzCdeclFreeProc)SearchPattern(GetModuleBase(EBaseAddr), GetModuleSize(EBaseAddr), KRKRZ_FREE_SIG, sizeofsig(KRKRZ_FREE_SIG));
+	if (pfnKrkrzNew == nullptr || pfnKrkrzFree == nullptr)
+	{
+		std::cout << L"无法获得内存管理函数指针，请检查特征码！" << std::endl;
+		pfnKrkrzNew = malloc;
+		pfnKrkrzFree = free;
+	}
 }
-
 
 //劫持CompoundStorageMedia的构造函数，获得this指针，以便后续调用其成员函数
 CSMFS_Constructor pfnCSMFS_Constructor;
@@ -373,9 +569,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     {
         case DLL_PROCESS_ATTACH:
         {
-			EBaseAddr = GetModuleHandle(NULL);
-			pMyLoadCXAndPatch = (DWORD)MyLoadCXAndPatch;
-
             // See https://github.com/microsoft/Detours/wiki/DetourRestoreAfterWith
             DetourRestoreAfterWith();
             MakeConsole();
@@ -384,11 +577,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             //std::cout << FixR6002 << std::endl;
             //std::cout << FuncTest << std::endl;
 
+			EBaseAddr = GetModuleHandle(NULL);
             FixR6002(EBaseAddr);
 
             SignaturePatch(EBaseAddr, SteamARG, SbeamARG, 0, false);
 
-            HijackCxdecLoadRouting();
+			GetExeMallocFuncs();
+
+			//劫持插件加载流程
+			DWORD pMyLoadCXAndPatch = (DWORD)MyLoadCXAndPatch;
+			SignaturePatch(EBaseAddr, LoadCXSIG, &pMyLoadCXAndPatch, sizeofsig(LoadCXSIG));
 
             break;
         }
