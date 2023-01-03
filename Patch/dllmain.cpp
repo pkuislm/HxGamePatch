@@ -563,7 +563,17 @@ void GetExeMallocFuncs()
 	pfnKrkrzFree = (tKrkrzCdeclFreeProc)SearchPattern(GetModuleBase(EBaseAddr), GetModuleSize(EBaseAddr), KRKRZ_FREE_SIG, sizeofsig(KRKRZ_FREE_SIG));
 	if (pfnKrkrzNew == nullptr || pfnKrkrzFree == nullptr)
 	{
-		std::cout << L"无法获得内存管理函数指针，请检查特征码！" << std::endl;
+		std::cout << "无法获得内存管理函数指针: ";
+
+		if (pfnKrkrzNew == nullptr)
+		{
+			std::cout << "new ";
+		}
+		if (pfnKrkrzFree == nullptr)
+		{
+			std::cout << "delete ";
+		}
+		std::cout << "，请检查特征码！" << std::endl;
 		pfnKrkrzNew = malloc;
 		pfnKrkrzFree = free;
 	}
