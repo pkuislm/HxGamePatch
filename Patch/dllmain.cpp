@@ -642,7 +642,7 @@ void SetupPatch()
 			MakeConsole();
 		}
 		
-		if (settings_sec->GetValue("Enable").AsBool())
+		if (settings_sec->GetValue("EnablePatch").AsBool())
 		{
 			auto echo = settings_sec->GetValue("PatchFileEcho").AsBool();
 
@@ -651,13 +651,6 @@ void SetupPatch()
 			{
 				SetUpFileTable(patches[i].AsString(), echo);
 			}
-
-			auto updates = settings_sec->GetValue("UpdatePacks").AsMap().ToMap<std::string, std::string>();
-			for (auto& i : updates)
-			{
-				UpdateFileTable(i.first, i.second, echo);
-			}
-
 			auto ppath = settings_sec->GetValue("ExternalPath").AsString();
 			if (ppath != "")
 			{
@@ -667,6 +660,17 @@ void SetupPatch()
 				ext_path += Utf8ToUcs2(ppath.c_str()).GetString();
 				ext_path += L"\\";
 				std::wcout << L"ExtFolder: " << ext_path << std::endl;
+			}
+		}
+
+		if (settings_sec->GetValue("EnableUpdate").AsBool())
+		{
+			auto echo = settings_sec->GetValue("PatchFileEcho").AsBool();
+
+			auto updates = settings_sec->GetValue("UpdatePacks").AsMap().ToMap<std::string, std::string>();
+			for (auto& i : updates)
+			{
+				UpdateFileTable(i.first, i.second, echo);
 			}
 		}
 	}

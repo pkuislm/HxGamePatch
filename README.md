@@ -23,11 +23,16 @@ Target = ambitious_mission.exe
 [PatchSettings]
 # 开启命令行窗口用于输出Debug信息（例如补丁文件加载信息）
 DebugWindow = false
+# 开启文件补丁功能
 EnableFilePatch = false
-# 向控制台输出补丁文件的加载情况
+# 补丁文件加载回显
 PatchFileEcho = false
 # 你想要添加的封包名称，多个封包间以英文逗号分隔
 PatchPacks = update.zip,update2.zip
+# 开启补丁更新
+EnableUpdate = false
+# 补丁文件更新回显
+UpdateFileEcho = true
 # 对已添加的封包内的文件进行覆盖，格式：(想要覆盖的封包名称):(覆盖它的封包名称)
 # 你也可以同时在覆盖封包内添加新的文件
 UpdatePacks = update.zip:staff.zip,update2.zip:imgs.zip
@@ -78,6 +83,8 @@ EnableFilePatch = false
 PatchFileEcho = false
 # Packs you want dll to add, split by ','
 PatchPacks = update.zip,update2.zip
+EnableUpdate = false
+UpdateFileEcho = true
 # Override file inside packs, format: (original pack):(override pack), ...
 # You can add new files while overriding other files
 UpdatePacks = update.zip:staff.zip,update2.zip:imgs.zip
