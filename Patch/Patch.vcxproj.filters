@@ -43,5 +43,8 @@
     <ClInclude Include="signatures.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\ThirdParty\LeksysINI\iniparser.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

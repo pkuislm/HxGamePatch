@@ -8,6 +8,8 @@
 #include <fstream>
 #include <thread>
 #include <sstream>
+#include <mutex>
+#include "../ThirdParty/LeksysINI/iniparser.hpp"
 
 #undef min
 #undef max
@@ -18,6 +20,13 @@ extern "C"
 	typedef HRESULT(_stdcall* tTVPV2LinkProc)(iTVPFunctionExporter*);
 	typedef HRESULT(_stdcall* tTVPV2UnlinkProc)();
 }
+
+//zip文件系统的
+bool SetUpFileTable(const std::string& package, bool echo = false, bool append = true);
+bool UpdateFileTable(const std::string& OrigName, const std::string& package, bool echo = false);
+bool TryOpenPkgFile(const std::wstring& filename, std::vector<byte>& dst);
+bool IsPkgFileExists(const std::wstring& filename);
+bool GetFileSizeIfExists(const std::wstring& filename, uint64_t* size);
 
 //fastcall是thiscall的替代，因为fastcall使用eax, ecx传递前两个参数，而thiscall用ecx传递this指针，使用时只需抛弃掉第一个参数即可
 typedef tTJSString*         (__fastcall* CSMFS_GetPathHash)	 (void*, void*, tTJSString*, tTJSString*);
@@ -35,7 +44,7 @@ typedef void*				(_cdecl* tKrkrzCdeclNewProc)			(size_t);
 //#define COUT(x) std::cout << x << std::endl;
 //#define ONLY_BYPASS_SIGCHECK                  //仅过验证，不安装文件相关hook
 //#define DUMP_SCRIPTS
-constexpr int PACKAGE_AMOUNT = 5;               //游戏一共（至少）要加载多少封包
+constexpr int PACKAGE_AMOUNT = 5;               //游戏一共（至少）要加载多少封包，用来指示dump进程是否可以开始
 
 static HMODULE EBaseAddr = 0;//game.exe基址
 static HMODULE CBaseAddr = 0;//cxdec.dll基址
@@ -45,9 +54,13 @@ static bool IsLoadedCxdec = false;
 static bool IsFSInitialized = false;
 //记录游戏一共调用Mount加载了几个封包（根据这个判断是否加载完成）
 static int PackagesLoaded = 0;
-
+//游戏的原位置是一个FF15 Call，所以这个变量必须是一个全局变量
+static DWORD pMyLoadCXAndPatch = 0;
+//patch文件的默认外置路径
+std::wstring ext_path = L".\\ProjectDir\\";
 
 //用于实现BinaryStream所必要的new和delete
+//使用kr内部的内存管理函数，以避免由于内存所有权问题造成的程序崩溃
 tKrkrzCdeclNewProc pfnKrkrzNew = nullptr;
 tKrkrzCdeclFreeProc pfnKrkrzFree = nullptr;
 void* KrkrNew(size_t count)
@@ -93,6 +106,16 @@ public:
 		{
 			m_data.resize(size);
 			memcpy(m_data.data(), data, size);
+		}
+		m_size = size;
+		m_offset = 0;
+	}
+
+	PBinaryStream(size_t size)
+	{
+		if (size > 0)
+		{
+			m_data.resize(size);
 		}
 		m_size = size;
 		m_offset = 0;
@@ -192,6 +215,10 @@ public:
 		return m_size;
 	}
 
+	std::vector<uint8_t>& GetVect()
+	{
+		return m_data;
+	}
 private:
 	std::vector<uint8_t> m_data;
 	size_t m_size;
@@ -223,7 +250,7 @@ struct CX_Funcs
         auto base = GetModuleBase(CBaseAddr);
         auto size = GetModuleSize(CBaseAddr);
         m_this = CompoundStorageMedia;
-		//这两个时必须拿到的，如果要进行文件替换的话
+		//这两个是必须拿到的，如果要进行文件替换的话
         m_CheckExistenceStorage = (CSMFS_CheckExistenceStorage)SearchPattern(base, size, CX_CSMediaFS_CheckExistenceStorage, sizeofsig(CX_CSMediaFS_CheckExistenceStorage));
         m_Open = (CSMFS_Open)SearchPattern(base, size, CX_CSMediaFS_Open, sizeofsig(CX_CSMediaFS_Open));
         //剩下这几个都随便了，其实这些更偏向实验性的
@@ -233,20 +260,20 @@ struct CX_Funcs
         
         //函数劫持
         InlineHook(m_Open, MyOpen);
+        InlineHook(m_CheckExistenceStorage, MyCheckExistenceStorage);
         InlineHook(m_Mount, MyMount);
         //InlineHook(m_FindEntry, MyFindEntry);
-        InlineHook(m_CheckExistenceStorage, MyCheckExistenceStorage);
 
-        printf("-----\nthis: 0x%08X\nCheckExistenceStorage: 0x%08X\nFindEntry: 0x%08X\nGetPathHash: 0x%08X\nOpen: 0x%08X\nMount: 0x%08X\n-----\n", 
+        /*printf("-----\nthis: 0x%08X\nCheckExistenceStorage: 0x%08X\nFindEntry: 0x%08X\nGetPathHash: 0x%08X\nOpen: 0x%08X\nMount: 0x%08X\n-----\n", 
             reinterpret_cast<int>(m_this), 
             reinterpret_cast<int>(m_CheckExistenceStorage), 
             reinterpret_cast<int>(m_FindEntry), 
             reinterpret_cast<int>(m_GetPathHash), 
             reinterpret_cast<int>(m_Open), 
-            reinterpret_cast<int>(m_Mount));
+            reinterpret_cast<int>(m_Mount));*/
     }
 
-	//在vftable里直接拿指针（这样完全不保证准确度和稳定性）
+	//在vftable里直接拿指针（这样完全不保证准确度和稳定性）*弃用
 	void SetUpFuncPointersVftable(void* CompoundStorageMedia)
 	{
 		//   CompoundStorageMedia
@@ -270,13 +297,46 @@ struct CX_Funcs
 bool MyCheckExistenceStorage(void* a, tTJSString* b)
 {
     //std::cout << "Check: " << Ucs2ToGbk(b->c_str()) << std::endl;
-    return static_CXFuncs.m_CheckExistenceStorage(a, b);
+	if(!static_CXFuncs.m_CheckExistenceStorage(a, b))
+		return IsPkgFileExists(&b->c_str()[2]);
+	return true;
 }
 
 
 tTJSBinaryStream* __cdecl MyOpen(void* a, tTJSString* name, int flags)
 {
-	std::cout << "Open: " << Ucs2ToGbk(name->c_str()) << std::endl;
+	uint64_t fsize;
+	if (GetFileSizeIfExists(&name->c_str()[2], &fsize))
+	{
+		//从这里就开始用krz自己的内存管理，这样应该会稳定一些
+		try
+		{
+			if (fsize == 0)//外置文件
+			{
+				IStream* pStream;
+				std::wstring NewPath = ext_path + &name->c_str()[2];
+				auto hr = SHCreateStreamOnFileEx(NewPath.c_str(), STGM_READ, 0, FALSE, NULL, &pStream);
+				if (SUCCEEDED(hr))
+				{
+					//std::cout << "PatchOpenWithLocalFileStream: " << Ucs2ToGbk(name->c_str()) << std::endl;
+					return TVPCreateBinaryStreamAdapter(pStream);
+				}
+			}
+			//std::cout << "File_size: " << (size_t)fsize << std::endl;
+			PBinaryStream* ret = new PBinaryStream(fsize);
+			if (TryOpenPkgFile(&name->c_str()[2], ret->GetVect()))
+			{
+				//std::cout << "PatchOpenWithMemStream: " << Ucs2ToGbk(name->c_str()) << std::endl;
+				return ret;
+			}
+			delete ret;
+		}
+		catch (std::exception e)
+		{
+			std::cout << "[Error][OpenPatchFile] " << e.what() << std::endl;
+			return static_CXFuncs.m_Open(a, name, flags);
+		}
+	}
 	return static_CXFuncs.m_Open(a, name, flags);
 }
 
@@ -441,7 +501,7 @@ void DumpAllScripts()
     }
 }
 
-bool DumpFile(std::wstring& file)
+void DumpFile(std::wstring& file)
 {
 	tTJSString tjsfile(file.c_str());
 	if (static_CXFuncs.m_CheckExistenceStorage(static_CXFuncs.m_this, &tjsfile))
@@ -485,9 +545,13 @@ void CheckAndDump()
         Sleep(1000);
     }
     IsFSInitialized = true;
-    std::cout << "FS Initialized successfully." << std::endl;
-	MkDdirs();
+	//for (auto stt:sfiles)
+	//{
+	//	DumpFile(stt);
+	//}
+    //std::cout << "FS Initialized successfully." << std::endl;
 #ifdef DUMP_SCRIPTS
+	MkDdirs();
 	DumpAllScripts();
 #endif
 }
@@ -526,7 +590,7 @@ HRESULT _stdcall HookV2Link(iTVPFunctionExporter* exporter)
     HRESULT ret = S_FALSE;
     if (TVPInitImportStub(exporter))
     {
-        std::cout << "Plugin successfully initialized." << std::endl;
+        //std::cout << "Plugin successfully initialized." << std::endl;
         ret = pfnV2Link(exporter);
     }
     return ret;
@@ -557,7 +621,46 @@ HANDLE WINAPI MyLoadCXAndPatch(LPCWSTR lpLibFileName)
     return CBaseAddr;
 }
 
+void SetupPatch()
+{
+	INI::File pconf;
+	if (pconf.Load(".\\config.ini"))
+	{
+		auto settings_sec = pconf.GetSection("PatchSettings");
+		if (settings_sec->GetValue("DebugWindow").AsBool())
+		{
+			MakeConsole();
+		}
+		
+		if (settings_sec->GetValue("Enable").AsBool())
+		{
+			auto echo = settings_sec->GetValue("PatchFileEcho").AsBool();
 
+			auto patches = settings_sec->GetValue("PatchPacks").AsArray();
+			for (auto i = 0; i < patches.Size(); ++i)
+			{
+				SetUpFileTable(patches[i].AsString(), echo);
+			}
+
+			auto updates = settings_sec->GetValue("UpdatePacks").AsMap().ToMap<std::string, std::string>();
+			for (auto& i : updates)
+			{
+				UpdateFileTable(i.first, i.second, echo);
+			}
+
+			auto ppath = settings_sec->GetValue("ExternalPath").AsString();
+			if (ppath != "")
+			{
+				ext_path.clear();
+				ext_path.resize(4 + ppath.size());
+				ext_path = L".\\";
+				ext_path += Utf8ToUcs2(ppath.c_str()).GetString();
+				ext_path += L"\\";
+				std::wcout << L"ExtFolder: " << ext_path << std::endl;
+			}
+		}
+	}
+}
 //=============================================================================
 // DLL Entry Point
 //=============================================================================
@@ -569,15 +672,13 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     {
         case DLL_PROCESS_ATTACH:
         {
+			EBaseAddr = GetModuleHandle(NULL);
             // See https://github.com/microsoft/Detours/wiki/DetourRestoreAfterWith
             DetourRestoreAfterWith();
-            MakeConsole();
 			setlocale(LC_ALL, "zh-cn");
-            //std::cout << MyCSMFSConstructor << std::endl;
-            //std::cout << FixR6002 << std::endl;
-            //std::cout << FuncTest << std::endl;
 
-			EBaseAddr = GetModuleHandle(NULL);
+			SetupPatch();
+			
             FixR6002(EBaseAddr);
 
             SignaturePatch(EBaseAddr, SteamARG, SbeamARG, 0, false);
@@ -585,7 +686,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 			GetExeMallocFuncs();
 
 			//劫持插件加载流程
-			DWORD pMyLoadCXAndPatch = (DWORD)MyLoadCXAndPatch;
+			pMyLoadCXAndPatch = (DWORD)MyLoadCXAndPatch;
 			SignaturePatch(EBaseAddr, LoadCXSIG, &pMyLoadCXAndPatch, sizeofsig(LoadCXSIG));
 
             break;

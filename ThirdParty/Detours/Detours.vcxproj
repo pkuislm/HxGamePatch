@@ -72,13 +72,13 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <OutDir>$(Configuration)_$(PlatformShortName)\</OutDir>
-    <IntDir>$(Configuration)_$(PlatformShortName)\Objs\</IntDir>
+    <OutDir>$(SolutionDir)Build\$(Configuration)_$(PlatformShortName)_$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir)Build\$(Configuration)_$(PlatformShortName)_$(ProjectName)\Objs\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
-    <OutDir>$(Configuration)_$(PlatformShortName)\</OutDir>
-    <IntDir>$(Configuration)_$(PlatformShortName)\Objs\</IntDir>
+    <OutDir>$(SolutionDir)Build\$(Configuration)_$(PlatformShortName)_$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir)Build\$(Configuration)_$(PlatformShortName)_$(ProjectName)\Objs\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
@@ -97,6 +97,7 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

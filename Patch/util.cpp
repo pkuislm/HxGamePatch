@@ -244,21 +244,19 @@ void PatchWriteStringW(LPVOID lpAddr, LPCWSTR lpBuf)
     PatchWrite(lpAddr, lpBuf, nSize);
 }
 
-
+//R6002是C++Runtime的一个错误代码
+//如果初始化代码发现只读段（比如.rdata）权限被修改时，就不会加载浮点数支持，导致出现此错误。
+//这里叫他不管怎么样都加载就行了
 void FixR6002(HMODULE BaseAddr)
 {
 	//   004947D5  |.  8B40 24                      MOV EAX,DWORD PTR DS:[EAX+24]
 	//   004947D8  |.  C1E8 1F                      SHR EAX,1F
 	//   004947DB  |.  F7D0                         NOT EAX
 	//   004947DD  |.  83E0 01                      AND EAX,00000001
+    // 
+	//   83 -> C8
+    //   004947DD  |.  C8E0 01                      OR  EAX,00000001
     SignaturePatch(BaseAddr, R6002SIG, '\xC8', 9);
-	//PVOID nNWAddress = SearchPattern(GetModuleBase((HMODULE)(BaseAddr)), GetModuleSize((HMODULE)(BaseAddr)), R6002SIG, sizeofsig(R6002SIG));
-	//if (nNWAddress) 
- //   {
-	//	// 83    C8
-	//	// AND ->OR
- //       PatchWrite((LPVOID)((DWORD)nNWAddress + 9), '\xC8');
-	//}
 }
 
 

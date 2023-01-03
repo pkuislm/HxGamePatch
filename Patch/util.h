@@ -271,7 +271,7 @@ PIMAGE_SECTION_HEADER FindSectionFromModule(HMODULE hModule, PCSTR pName);
 //=============================================================================
 
 
-constexpr auto R6002SIG = "\x8B\x40\x24\xC1\xE8\x1F\xF7\xD0\x83\xE0\x01";
+#define R6002SIG "\x8B\x40\x24\xC1\xE8\x1F\xF7\xD0\x83\xE0\x01"
 
 
 void FixR6002(HMODULE BaseAddr);
