@@ -24,7 +24,7 @@ Target = ambitious_mission.exe
 # 开启命令行窗口用于输出Debug信息（例如补丁文件加载信息）
 DebugWindow = false
 # 开启文件补丁功能
-EnableFilePatch = false
+EnablePatch = false
 # 补丁文件加载回显
 PatchFileEcho = false
 # 你想要添加的封包名称，多个封包间以英文逗号分隔
@@ -78,7 +78,7 @@ Target = ambitious_mission.exe
 [PatchSettings]
 # Enable the CommandPrompt Window for debug
 DebugWindow = false
-EnableFilePatch = false
+EnablePatch = false
 # Output FilePatch details to CONOUT$
 PatchFileEcho = false
 # Packs you want dll to add, split by ','
