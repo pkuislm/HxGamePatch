@@ -226,6 +226,8 @@ private:
 };
 #pragma endregion
 
+#pragma region StorageMediaImpl
+#pragma endregion
 
 void								DumpAllScripts			();
 tTJSBinaryStream*					MyOpen					(void* a, tTJSString* name, int flags);

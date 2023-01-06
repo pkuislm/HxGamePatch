@@ -2,6 +2,18 @@
 
 针对新版加密方式的krkr游戏设计的补丁 
 
+# 请注意
+
+请使用这位大佬的解决方案，这个解决方案可以读取未加密XP3文件作为补丁封包，更优雅、更稳定。项目地址 -> [KrkrPatch](https://github.com/crskycode/KrkrPatch)
+
+# Notice
+
+There is a better solution than this project, which can use unencrypted xp3 files as patch packages. Click here -> [KrkrPatch](https://github.com/crskycode/KrkrPatch)
+
+# 
+
+# 
+
 ## 功能
 
 * 过完整性验证（Malformed exe/dll） 
