@@ -4,11 +4,11 @@
 
 # 请注意
 
-请使用这位大佬的解决方案，这个解决方案可以读取未加密XP3文件作为补丁封包，更优雅、更稳定。项目地址 -> [KrkrPatch](https://github.com/crskycode/KrkrPatch)
+请使用这位大佬的解决方案，这个解决方案可以读取未加密XP3文件作为补丁封包，更优雅、更稳定。[项目地址](https://github.com/crskycode/KrkrPatch)
 
 # Notice
 
-There is a better solution than this project, which can use unencrypted xp3 files as patch packages. Click here -> [KrkrPatch](https://github.com/crskycode/KrkrPatch)
+There is a better solution than this project, which can use unencrypted xp3 files as patch packages.  [Click here](https://github.com/crskycode/KrkrPatch)
 
 # 
 
